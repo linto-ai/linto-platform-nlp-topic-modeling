@@ -1,0 +1,2 @@
+# Topic Modeling
+bertopic==0.9.3
