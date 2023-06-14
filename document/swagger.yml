@@ -1,0 +1,100 @@
+openapi: 3.0.1
+info:
+  title: Topic Modeling API
+  description: API to detect topics in text.
+  version: 0.2.0
+
+servers:
+- url: /
+
+paths:
+  /topic/{lang}:
+    post:
+      tags:
+      - Topic Modeling API
+      summary: Perform Topic Modeling
+      parameters:
+        - name: lang
+          in: path
+          required: true
+          description: Language
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/request'
+      responses:
+        200:
+          description: "Job successfully finished"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/responsemodel'
+        400:
+          description: "Bad request"
+        500:
+          description: "Server error"
+        
+components:
+  schemas:
+    article:
+      type: object
+      properties:
+        text:
+          type: string
+          default: This is an article.
+    request:
+      type: object
+      properties:
+        articles:
+          type: array
+          required: true
+          items:
+            $ref: '#/components/schemas/article'
+        component_cfg:
+          type: object
+    batch:
+      type: object
+      properties:
+        text:
+          type: string
+        topics:
+          type: array
+          items:
+            type: '#/components/schemas/topic'
+        topic_assignments:
+          type: array
+          items:
+            type: '#/components/schemas/topic_assignment'
+    topic_assignment:
+      type: object
+      properties:
+        text: string
+        assigned_id: interger
+        probabilities:
+          type: array
+          items: float        
+    topic:
+      type: object
+      properties:
+        topic_id: interger
+        count: interger
+        phrases:
+          type: array
+          items: '#/components/schemas/phrase'
+    phrase:
+      type: object
+      properties:
+        text: string
+        score: float
+    
+    responsemodel:
+      type: object
+      properties:
+        topic:
+          type: array
+          items:
+            $ref: '#/components/schemas/batch'
+        

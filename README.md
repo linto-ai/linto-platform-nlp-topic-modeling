@@ -3,12 +3,9 @@
 ## Description
 This repository is for building a Docker image for LinTO's NLP service: Topic Modeling on the basis of [linto-platform-nlp-core](https://github.com/linto-ai/linto-platform-nlp-core), can be deployed along with [LinTO stack](https://github.com/linto-ai/linto-platform-stack) or in a standalone way (see Develop section in below).
 
-linto-platform-nlp-topic-modeling is backed by [spaCy](https://spacy.io/) v3.0+ featuring transformer-based pipelines, thus deploying with GPU support is highly recommeded for inference efficiency.
+LinTo's NLP services adopt the basic design concept of spaCy: [component and pipeline](https://spacy.io/usage/processing-pipelines), components (located under the folder `components/`) are decoupled from the service and can be easily re-used in other spaCy projects, components are organised into pipelines for realising specific NLP tasks. 
 
-LinTo's NLP services adopt the basic design concept of spaCy: [component and pipeline](https://spacy.io/usage/processing-pipelines), components are decoupled from the service and can be easily re-used in other projects, components are organised into pipelines for realising specific NLP tasks. 
-
-This service uses [FastAPI](https://fastapi.tiangolo.com/) to serve custom spaCy's components as pipelines:
-- `topic`: Topic Modeling
+This service can be launched in two ways: REST API and Celery task, with and without GPU support.
 
 ## Usage
 
@@ -29,13 +26,21 @@ bash scripts/download_models.sh
 
 2 configure running environment variables
 ```bash
-mv .envdefault .env
-# cat .envdefault
-# APP_LANG=fr en | Running language of application, "fr en", "fr", etc.
-# ASSETS_PATH_ON_HOST=./assets | Storage path of models on host. (only applicable when docker-compose is used)
-# ASSETS_PATH_IN_CONTAINER=/app/assets | Volume mount point of models in container. (only applicable when docker-compose is used)
-# WORKER_NUMBER=1 | Number of processing workers. (only applicable when docker-compose is used)
+cp .envdefault .env
 ```
+
+| Environment Variable | Description | Default Value |
+| --- | --- | --- |
+| `APP_LANG` | A space-separated list of supported languages for the application | fr en |
+| `ASSETS_PATH_ON_HOST` | The path to the assets folder on the host machine | ./assets |
+| `ASSETS_PATH_IN_CONTAINER` | The volume mount point of models in container | /app/assets |
+| `LM_MAP` | A JSON string that maps each supported language to its corresponding language model | {"fr":"sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2","en":"sentence-transformers/all-MiniLM-L6-v2"} |
+| `SERVICE_MODE` | The mode in which the service is served, either "http" (REST API) or "task" (Celery task) | "http" |
+| `CONCURRENCY` | The maximum number of requests that can be handled concurrently | 1 |
+| `USE_GPU` | A flag indicating whether to use GPU for computation or not, either "True" or "False" | True |
+| `SERVICE_NAME` | The name of the micro-service | topic |
+| `SERVICES_BROKER` | The URL of the broker server used for communication between micro-services | "redis://localhost:6379" |
+| `BROKER_PASS` | The password for accessing the broker server | None |
 
 4 Build image
 ```bash
@@ -52,22 +57,29 @@ sudo docker run --gpus all \
 --rm -p 80:80 \
 -v $PWD/assets:/app/assets:ro \
 --env-file .env \
-lintoai/linto-platform-nlp-topic-modeling:latest \
---workers 1
+lintoai/linto-platform-nlp-topic-modeling:latest
 ```
+<details>
+  <summary>Check running with CPU only setting</summary>
+  
+  - remove `--gpus all` from the first command.
+  - set `USE_GPU=False` in the `.env`.
+</details>
+
 or
+
 ```bash
 sudo docker-compose up
 ```
 <details>
   <summary>Check running with CPU only setting</summary>
   
-  - remove `--gpus all` from the first command.
   - remove `runtime: nvidia` from the `docker-compose.yml` file.
+  - set `USE_GPU=False` in the `.env`.
 </details>
 
 
-6 Navigate to `http://localhost/docs` or `http://localhost/redoc` in your browser, to explore the REST API interactively. See the examples for how to query the API.
+6 If running under `SERVICE_MODE=http`, navigate to `http://localhost/docs` or `http://localhost/redoc` in your browser, to explore the REST API interactively. See the examples for how to query the API. If running under `SERVICE_MODE=task`, plese refers to the individual section in the end of this README.
 
 
 ## Specification for `http://localhost/topic/{lang}`
@@ -460,3 +472,31 @@ Component's config can be modified in [`components/config.cfg`](components/confi
 
 ### Implementation details
 This repository only intergrates the [BERTopic](https://github.com/dmmiller612/bert-extractive-summarizer) with [Sentence Transformers](https://www.sbert.net/) backend, the usage of topic visualization, search topics, topic per class, (semi)-supervised topic modeling, custom sub-models, and all the operations after training are not implemented.
+
+
+## Testing Celery mode locally
+1 Install Redis on your local machine, and run it with:
+```bash
+redis-server --protected-mode no --bind 0.0.0.0 --loglevel debug
+```
+
+2 Make sure in your `.env`, these two variables are set correctly as `SERVICE_MODE=task` and `SERVICES_BROKER=redis://172.17.0.1:6379`
+
+Then start your docker container with either `docker run` or `docker-compose up` as shown in the previous section.
+
+3 On your local computer, run this python script: 
+```python
+from celery import Celery
+celery = Celery(broker='redis://localhost:6379/0', backend='redis://localhost:6379/1')
+r = celery.send_task(
+    'topic_task', 
+    (
+        'en', 
+        [
+            "Google LLC is an American multinational technology company that specializes in Internet-related services and products, which include online advertising technologies, a search engine, cloud computing, software, and hardware. It is considered one of the Big Five companies in the American information technology industry, along with Amazon, Apple, Meta (Facebook) and Microsoft. | Amazon.com, Inc. is an American multinational technology company which focuses on e-commerce, cloud computing, digital streaming, and artificial intelligence. It is one of the Big Five companies in the U.S. information technology industry, along with Google (Alphabet), Apple, Meta (Facebook), and Microsoft. The company has been referred to as one of the most influential economic and cultural forces in the world, as well as the world's most valuable brand. | Meta Platforms, Inc., doing business as Meta and formerly known as Facebook, Inc., is a multinational technology conglomerate based in Menlo Park, California. The company is the parent organization of Facebook, Instagram, and WhatsApp, among other subsidiaries. Meta is one of the world's most valuable companies and is considered one of the Big Tech companies in U.S. information technology, alongside Amazon, Google, Apple, and Microsoft. The company generates a substantial share of its revenue from the sale of advertisement placements to marketers. | Apple Inc. is an American multinational technology company that specializes in consumer electronics, computer software and online services. Apple is the largest information technology company by revenue (totaling $274.5 billion in 2020) and, since January 2021, the world's most valuable company. As of 2021, Apple is the fourth-largest PC vendor by unit sales and fourth-largest smartphone manufacturer. It is one of the Big Five American information technology companies, alongside Amazon, Google (Alphabet), Facebook (Meta), and Microsoft. | Microsoft Corporation is an American multinational technology corporation which produces computer software, consumer electronics, personal computers, and related services. Its best-known software products are the Microsoft Windows line of operating systems, the Microsoft Office suite, and the Internet Explorer and Edge web browsers. Its flagship hardware products are the Xbox video game consoles and the Microsoft Surface lineup of touchscreen personal computers. Microsoft ranked No. 21 in the 2020 Fortune 500 rankings of the largest United States corporations by total revenue; it was the world's largest software maker by revenue as of 2016. It is considered one of the Big Five companies in the U.S. information technology industry, along with Amazon, Google (Alphabet), Apple, and Facebook (Meta). | Supervised learning (SL) is the machine learning task of learning a function that maps an input to an output based on example input-output pairs. It infers a function from labeled training data consisting of a set of training examples. In supervised learning, each example is a pair consisting of an input object (typically a vector) and a desired output value (also called the supervisory signal). A supervised learning algorithm analyzes the training data and produces an inferred function, which can be used for mapping new examples. An optimal scenario will allow for the algorithm to correctly determine the class labels for unseen instances. This requires the learning algorithm to generalize from the training data to unseen situations in a reasonable way (see inductive bias). This statistical quality of an algorithm is measured through the so-called generalization error. | Unsupervised learning is a type of machine learning in which the algorithm is not provided with any pre-assigned labels or scores for the training data.[1][2] As a result, unsupervised learning algorithms must first self-discover any naturally occurring patterns in that training data set. Common examples include clustering, where the algorithm automatically groups its training examples into categories with similar features, and principal component analysis, where the algorithm finds ways to compress the training data set by identifying which features are most useful for discriminating between different training examples, and discarding the rest. This contrasts with supervised learning in which the training data include pre-assigned category labels (often by a human, or from the output of non-learning classification algorithm). Other intermediate levels in the supervision spectrum include reinforcement learning, where only numerical scores are available for each training example instead of detailed tags, and semi-supervised learning where only a portion of the training data have been tagged. | Semi-supervised learning is an approach to machine learning that combines a small amount of labeled data with a large amount of unlabeled data during training. Semi-supervised learning falls between unsupervised learning (with no labeled training data) and supervised learning (with only labeled training data). It is a special instance of weak supervision. | Reinforcement learning (RL) is an area of machine learning concerned with how intelligent agents ought to take actions in an environment in order to maximize the notion of cumulative reward. Reinforcement learning is one of three basic machine learning paradigms, alongside supervised learning and unsupervised learning. | Deep learning (also known as deep structured learning) is part of a broader family of machine learning methods based on artificial neural networks with representation learning. Learning can be supervised, semi-supervised or unsupervised."
+        ],
+        {"topic": {"top_n_words": 3}}
+    ),
+    queue='topic')
+r.get()
+```
